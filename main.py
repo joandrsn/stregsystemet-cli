@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-import requests
 import re
 import argparse
 import sys
@@ -18,7 +17,6 @@ else:
 
 
 exit_words = [':q', 'exit', 'quit', 'q']
-referer_header = {'Referer': url}
 balance = float()
 
 user_id = ''
@@ -65,22 +63,47 @@ def is_int(value):
         return False
 
 
-def get_wares():
-    try:
-        session = requests.Session()
-        r = session.get(f"{url}/{room}/", verify=False)
-    except:
-        print('Could not fetch wares from Stregsystement...')
-        raise SystemExit(1)
+def get_frontpage(url, room, error_msg="Noget gik galt"):
+    http = urllib3.PoolManager(cert_reqs="CERT_NONE") #CERT_NONE ignores the SSL certificate
+    resp = http.request("GET", f"{url}/{room}/")
+    if resp.status != 200:
+        print(error_msg, resp.status)
+        raise SystemExit
+    body_str = resp.data.decode("utf-8")
+    cookie_header_match = re.match(r"csrftoken=(.+?);", resp.headers['Set-Cookie']) # Fetches the csfrtoken from the header
+    form_match = re.search('(?<=name="csrfmiddlewaretoken" value=")(.+?)"', body_str) # Fetches the csfrtoken from the form
+    return {
+      'text': body_str,
+      'header_token': cookie_header_match.group(1),
+      'body_token': form_match.group(1)
+    }
 
-    body = r.text
+def post_quickbuy(url, room, data, cookies):
+    http = urllib3.PoolManager(cert_reqs="CERT_NONE") #CERT_NONE ignores the SSL certificate
+    cookies['djdt'] = 'show'
+    cookiestr = '; '.join('='.join((key,val)) for (key,val) in cookies.items())
+    resp = http.request("POST",
+        f"{url}/{room}/sale/",
+        fields=data,
+        headers={'Referer': url, 'Cookie': cookiestr},
+    )
+    if resp.status != 200:
+        print(error_msg, resp.status)
+        raise SystemExit
+    return {
+        'text': resp.data.decode("utf-8"),
+        'status_code': resp.status,
+    }
+
+def get_wares():
+    body = get_frontpage(url, room)['text']
+
     item_id_list = re.findall(r'<td>(\d+)</td>', body)
     item_name_list = re.findall(r'<td>(.+?)</td>', body)
     item_price_list = re.findall(r'<td align="right">(\d+\.\d+ kr)</td>', body)
 
     item_name_list = [x for x in item_name_list if not is_int(x)]
 
-    session.close()
     wares = []
     for i in range(len(item_id_list)):
         wares.append((item_id_list[i], item_name_list[i], item_price_list[i]))
@@ -104,29 +127,22 @@ def print_no_user_help(user):
     )
 
 def test_user(user):
-    session = requests.Session()
-    r = session.get(f"{url}/{room}/", verify=False)
-    if r.status_code != 200:
-        print('Noget gik galt', r.status_code)
-        raise SystemExit
-
-    token = re.search('(?<=name="csrfmiddlewaretoken" value=")(.+?)"', r.text)
-    json = {'quickbuy': f"{user}", 'csrfmiddlewaretoken': token.group(1)}
+    response = get_frontpage(url, room)
+    json = {'quickbuy': f"{user}", 'csrfmiddlewaretoken': response['body_token']}
     # pprint(json)
-    cookies = {'csrftoken': session.cookies.get_dict()['csrftoken'], 'djdt': 'show'}
+    cookies = {'csrftoken': response['header_token']}
     # pprint(cookies)
-    sale = session.post(f"{url}/{room}/sale/", verify=False, data=json, cookies=cookies, headers=referer_header)
-    session.close()
-    if sale.status_code != 200:
-        print('Noget gik galt.', sale.status_code, sale.content)
+    sale = post_quickbuy(url, room, json, cookies)
+    if sale['status_code'] != 200:
+        print('Noget gik galt.', sale['status_code'], sale['text'])
         raise SystemExit
-    if 'Det lader ikke til, at du er registreret som aktivt medlem af F-klubben' in sale.text:
+    if 'Det lader ikke til, at du er registreret som aktivt medlem af F-klubben' in sale['text']:
         return False
 
     global balance
-    balance = float(re.search(r'(\d+.\d+) kroner til gode!', sale.text).group(1))
+    balance = float(re.search(r'(\d+.\d+) kroner til gode!', sale['text']).group(1))
     global user_id
-    user_id = re.search(r'\<a href="/' + room + '/user/(\d+)"', sale.text).group(1)
+    user_id = re.search(r'\<a href="/' + room + '/user/(\d+)"', sale['text']).group(1)
     return True
 
 
@@ -174,25 +190,15 @@ def sale(user, itm, count=1):
     if itm in SHORTHANDS:
         itm = str(SHORTHANDS[itm])
 
-    session = requests.Session()
-    r = session.get(f"{url}/{room}/", verify=False)
-    if r.status_code != 200:
-        print('Noget gik galt', r.status_code)
-        raise SystemExit
+    response = get_frontpage(url, room)
+    json = {'quickbuy': f"{user} {itm}:{count}", 'csrfmiddlewaretoken': response['body_token']}
 
-    token = re.search('(?<=name="csrfmiddlewaretoken" value=")(.+?)"', r.text)
-    json = {'quickbuy': f"{user} {itm}:{count}", 'csrfmiddlewaretoken': token.group(1)}
-    sale = session.post(
-        f"{url}/{room}/sale/",
-        data=json,
-        cookies={'csrftoken': session.cookies.get_dict()['csrftoken'], 'djdt': 'show'},
-        headers=referer_header,
-    )
-    session.close()
-    if sale.status_code != 200:
-        print("Du har ikke købt din vare. Prøv igen", sale.status_code)
+    cookies = {'csrftoken': response['header_token']}
+    sale = post_quickbuy(url, room, json, cookies)
+    if sale['status_code'] != 200:
+        print("Du har ikke købt din vare. Prøv igen", sale['status_code'])
         raise SystemExit
-    elif 'STREGFORBUD!' not in sale.text:
+    elif 'STREGFORBUD!' not in sale['text']:
         if ':' in itm:
             if is_int(itm.split(':')[1]):
                 count = itm.split(':')[1]
