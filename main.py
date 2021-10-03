@@ -70,8 +70,10 @@ def get_frontpage(url, room, error_msg="Noget gik galt"):
         print(error_msg, resp.status)
         raise SystemExit
     body_str = resp.data.decode("utf-8")
-    cookie_header_match = re.match(r"csrftoken=(.+?);", resp.headers['Set-Cookie']) # Fetches the csfrtoken from the header
-    form_match = re.search('(?<=name="csrfmiddlewaretoken" value=")(.+?)"', body_str) # Fetches the csfrtoken from the form
+    # Fetch the csfrtoken from the header
+    cookie_header_match = re.match(r"csrftoken=(.+?);", resp.headers['Set-Cookie'])
+    # Fetch the csfrtoken from the form
+    form_match = re.search('(?<=name="csrfmiddlewaretoken" value=")(.+?)"', body_str)
     return {
       'text': body_str,
       'header_token': cookie_header_match.group(1),
@@ -81,7 +83,8 @@ def get_frontpage(url, room, error_msg="Noget gik galt"):
 def post_quickbuy(url, room, data, cookies):
     http = urllib3.PoolManager(cert_reqs="CERT_NONE") #CERT_NONE ignores the SSL certificate
     cookies['djdt'] = 'show'
-    cookiestr = '; '.join('='.join((key,val)) for (key,val) in cookies.items()) # Converts python dict into: "key1=value1; key2=value2"
+    # Convert python dict into: "key1=value1; key2=value2"
+    cookiestr = '; '.join('='.join((key,val)) for (key,val) in cookies.items())
     resp = http.request("POST",
         f"{url}/{room}/sale/",
         fields=data,
