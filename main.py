@@ -81,7 +81,7 @@ def get_frontpage(url, room, error_msg="Noget gik galt"):
 def post_quickbuy(url, room, data, cookies):
     http = urllib3.PoolManager(cert_reqs="CERT_NONE") #CERT_NONE ignores the SSL certificate
     cookies['djdt'] = 'show'
-    cookiestr = '; '.join('='.join((key,val)) for (key,val) in cookies.items())
+    cookiestr = '; '.join('='.join((key,val)) for (key,val) in cookies.items()) # Converts python dict into: "key1=value1; key2=value2"
     resp = http.request("POST",
         f"{url}/{room}/sale/",
         fields=data,
